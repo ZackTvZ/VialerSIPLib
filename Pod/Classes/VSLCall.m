@@ -262,7 +262,7 @@ NSString * const VSLCallErrorDuringSetupCallNotification = @"VSLCallErrorDuringS
     }
 
     [self checkCurrentThreadIsRegisteredWithPJSUA];
-    pj_status_t status = pjsua_call_make_call((int)self.account.accountId, &sipUri, &callSetting, NULL, NULL, (int *)&_callId);
+    pj_status_t status = pjsua_call_make_call((int)self.account.accountId, &sipUri, &callSetting, NULL, [self getMessageData], (int *)&_callId);
     VSLLogVerbose(@"Call(%@) started with id:%ld", self.uuid.UUIDString, (long)self.callId);
 
     NSError *error;
@@ -279,6 +279,46 @@ NSString * const VSLCallErrorDuringSetupCallNotification = @"VSLCallErrorDuringS
     }
 
     completion(error);
+}
+
+- (pjsua_msg_data *) getMessageData{
+    NSUserDefaults * standardUserDefaults = [NSUserDefaults standardUserDefaults];
+       NSString * maskingNumber = [standardUserDefaults objectForKey:@"voip_masking_number"];
+       if (maskingNumber) {
+           NSString *identity = [NSString stringWithFormat:@"sip:%@@%@", maskingNumber, _account.accountConfiguration.sipDomain];
+           return [self createMsgDataWithHeaders:@{ @"P-Asserted-Identity":  identity }];
+       }
+    return NULL;
+}
+
+- (pjsua_msg_data *) createMsgDataWithHeaders:(NSDictionary *) headers {
+    pjsua_msg_data *msg_data = malloc(sizeof(pjsua_msg_data));
+    pjsua_msg_data_init(msg_data);
+    pj_pool_t *pool;
+    
+    pj_caching_pool cp;
+    pj_caching_pool_init(&cp, &pj_pool_factory_default_policy, 0);
+    pool = pj_pool_create(&cp.factory, "call_tmp_header", 1000, 1000, NULL);
+    
+    pjsip_generic_string_hdr* hdr;
+    
+    for (NSString* key in headers) {
+        NSString* value = [headers objectForKey: key];
+        hdr = [self createHeaderAtPool:pool : key : value];
+        pj_list_push_back(&msg_data->hdr_list, hdr);
+        
+    }
+
+    pj_pool_release(pool);
+    return msg_data;
+}
+
+- (pjsip_generic_string_hdr *) createHeaderAtPool:(pj_pool_t *) pool
+                                                 :(NSString *)name
+                                                 :(NSString *)value {
+    pj_str_t hName = name.pjString;
+    pj_str_t hValue = value.pjString;
+    return pjsip_generic_string_hdr_create(pool, &hName, &hValue);
 }
 
 - (AVAudioPlayer *)disconnectedSoundPlayer {
